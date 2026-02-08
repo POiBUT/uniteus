@@ -1,5 +1,8 @@
-Chronology files
+#приватные файлы
 Хронология*.json
+хронология*.json
+*.csv
+
 # Logs
 logs
 *.log
