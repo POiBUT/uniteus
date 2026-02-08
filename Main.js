@@ -375,7 +375,8 @@ async function saveToMultipleFormats(rows, baseName) {
   results.excel = excelInfo;
 
   // CSV (частично, если данных много)
-  if (rows.length <= 500000) {
+  const maxCsvRowNumber = 500000;
+  if (rows.length <= maxCsvRowNumber) {
     console.log("Создание CSV файла...");
     const csvFile = `${baseName}_${timestamp}.csv`;
     // Записываем постепенно для больших файлов
@@ -412,11 +413,12 @@ async function saveToMultipleFormats(rows, baseName) {
     results.csv = csvFile;
     console.log(`CSV файл сохранен: ${csvFile}`);
   } else {
-    console.log("Пропускаю создание CSV (слишком много данных)");
+    console.log(`Пропускаю создание CSV (слишком много данных: ${rows.length} строк, максимум: ${maxCsvRowNumber} строк)`);
   }
 
   // JSON (только если данных немного)
-  if (rows.length <= 100000) {
+  const maxJsonRowNumber = 100000;
+  if (rows.length <= maxJsonRowNumber) {
     console.log("Создание JSON файла...");
     const jsonFile = `${baseName}_${timestamp}.json`;
     // Записываем постепенно
@@ -441,7 +443,7 @@ async function saveToMultipleFormats(rows, baseName) {
     results.json = jsonFile;
     console.log(`JSON файл сохранен: ${jsonFile}`);
   } else {
-    console.log("Пропускаю создание JSON (слишком много данных)");
+    console.log(`Пропускаю создание JSON (слишком много данных: ${rows.length} строк, максимум: ${maxJsonRowNumber} строк)`);
   }
 
   return results;
