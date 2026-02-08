@@ -1,45 +1,30 @@
 const fs = require('fs').promises;
+const XLSX = require('xlsx');
 const path = require('path');
 
-// Функция для парсинга координат (простая версия для строгого формата)
+// Функция для парсинга координат
 function parseLatLng(latLngString) {
-    if (!latLngString || typeof latLngString !== 'string') {
-        return { latitude: '', longitude: '' };
-    }
+    if (!latLngString) return { latitude: '', longitude: '' };
     
-    // Строгий формат: "55.6843886°, 37.5837741°"
-    // Просто удаляем символ градуса и разделяем по запятой
     const parts = latLngString.replace(/°/g, '').split(',').map(s => s.trim());
-    
-    if (parts.length >= 2) {
-        return {
-            latitude: parts[0],
-            longitude: parts[1]
-        };
-    }
-    
-    return { latitude: '', longitude: '' };
+    return parts.length >= 2 
+        ? { latitude: parts[0], longitude: parts[1] }
+        : { latitude: '', longitude: '' };
 }
 
 // Асинхронная обработка файла
 async function processJsonFileAsync(filePath) {
     try {
-        console.log(`Чтение файла: ${filePath}`);
+        console.log(`Чтение JSON файла: ${filePath}`);
         
-        // Читаем JSON-файл асинхронно
         const rawData = await fs.readFile(filePath, 'utf8');
         const data = JSON.parse(rawData);
         
-        console.log(`Файл прочитан, элементов: ${data.semanticSegments?.length || 0}`);
-        
         const rows = [];
-        let processedCount = 0;
         
-        // Обрабатываем каждый segment
+        // Обработка данных
         for (const segment of data.semanticSegments || []) {
-            processedCount++;
-            
-            // Случай 1: activity
+            // Обработка activity
             if (segment.activity) {
                 const activity = segment.activity;
                 
@@ -68,7 +53,7 @@ async function processJsonFileAsync(filePath) {
                 }
             }
             
-            // Случай 2: visit
+            // Обработка visit
             else if (segment.visit) {
                 const visit = segment.visit;
                 
@@ -85,7 +70,7 @@ async function processJsonFileAsync(filePath) {
                 }
             }
             
-            // Случай 3: timelinePath
+            // Обработка timelinePath
             else if (segment.timelinePath) {
                 for (const pointData of segment.timelinePath) {
                     if (pointData.point && pointData.time) {
@@ -101,14 +86,9 @@ async function processJsonFileAsync(filePath) {
                     }
                 }
             }
-            
-            // Логирование прогресса для больших файлов
-            if (processedCount % 1000 === 0) {
-                console.log(`Обработано ${processedCount} сегментов, найдено ${rows.length} записей...`);
-            }
         }
         
-        console.log(`Обработка завершена. Всего сегментов: ${processedCount}, записей: ${rows.length}`);
+        console.log(`Обработано ${rows.length} записей`);
         return rows;
         
     } catch (error) {
@@ -117,388 +97,205 @@ async function processJsonFileAsync(filePath) {
     }
 }
 
-// Асинхронное сохранение в CSV
-async function saveToCSVAsync(rows, outputPath) {
+// Сохранение в Excel (XLSX)
+async function saveToExcel(rows, outputPath, options = {}) {
     try {
-        console.log(`Сохранение в CSV: ${outputPath}`);
+        console.log(`Создание Excel файла: ${outputPath}`);
         
-        // Заголовки CSV
-        const headers = ['startTime', 'endTime', 'probability', 'latitude', 'longitude', 'source'];
+        // Создаем новую рабочую книгу
+        const wb = XLSX.utils.book_new();
         
-        // Создаем поток для записи (эффективно для больших файлов)
-        const writeStream = require('fs').createWriteStream(outputPath, { encoding: 'utf8' });
-        
-        // Пишем заголовки
-        writeStream.write(headers.join(',') + '\n');
-        
-        // Пишем данные построчно
-        for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            const csvRow = [
-                `"${escapeCSV(row.startTime)}"`,
-                `"${escapeCSV(row.endTime)}"`,
-                row.probability !== '' ? row.probability : '""',
-                `"${escapeCSV(row.latitude)}"`,
-                `"${escapeCSV(row.longitude)}"`,
-                `"${escapeCSV(row.source)}"`
-            ].join(',') + '\n';
-            
-            writeStream.write(csvRow);
-            
-            // Логирование прогресса для больших файлов
-            if (i > 0 && i % 10000 === 0) {
-                console.log(`Записано ${i} строк из ${rows.length}...`);
-            }
-        }
-        
-        // Закрываем поток и ждем завершения
-        await new Promise((resolve, reject) => {
-            writeStream.end();
-            writeStream.on('finish', resolve);
-            writeStream.on('error', reject);
+        // Преобразуем данные в рабочий лист
+        const ws = XLSX.utils.json_to_sheet(rows, {
+            header: ['startTime', 'endTime', 'probability', 'latitude', 'longitude', 'source'],
+            skipHeader: false
         });
         
-        console.log(`CSV файл сохранен: ${outputPath} (${rows.length} строк)`);
+        // Настраиваем ширину колонок
+        const colWidths = [
+            { wch: 30 }, // startTime
+            { wch: 30 }, // endTime
+            { wch: 15 }, // probability
+            { wch: 15 }, // latitude
+            { wch: 15 }, // longitude
+            { wch: 20 }  // source
+        ];
+        ws['!cols'] = colWidths;
+        
+        // Добавляем заголовок
+        if (options.title) {
+            XLSX.utils.sheet_add_aoa(ws, [[options.title]], { origin: "A1" });
+            XLSX.utils.sheet_add_aoa(ws, [[""]], { origin: "A2" }); // Пустая строка
+            // Сдвигаем данные на 2 строки вниз
+            const range = XLSX.utils.decode_range(ws['!ref']);
+            range.s.r = 2;
+            ws['!ref'] = XLSX.utils.encode_range(range);
+        }
+        
+        // Добавляем лист в книгу
+        const sheetName = options.sheetName || 'Хронология';
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        
+        // Добавляем второй лист со статистикой
+        if (options.includeStats) {
+            const stats = generateStatistics(rows);
+            const statsWs = XLSX.utils.json_to_sheet(stats);
+            XLSX.utils.book_append_sheet(wb, statsWs, 'Статистика');
+        }
+        
+        // Сохраняем файл
+        XLSX.writeFile(wb, outputPath);
+        
+        console.log(`Excel файл сохранен: ${outputPath}`);
+        
+        // Возвращаем информацию о файле
+        const fileStats = await fs.stat(outputPath);
+        return {
+            path: outputPath,
+            size: fileStats.size,
+            rows: rows.length,
+            sheets: wb.SheetNames.length
+        };
         
     } catch (error) {
-        console.error('Ошибка при сохранении CSV:', error.message);
+        console.error('Ошибка при сохранении Excel:', error.message);
         throw error;
     }
 }
 
-// Экранирование для CSV
-function escapeCSV(value) {
-    if (value === null || value === undefined) return '';
-    return String(value).replace(/"/g, '""');
-}
-
-// Асинхронное сохранение в JSON
-async function saveToJSONAsync(rows, outputPath) {
-    try {
-        console.log(`Сохранение в JSON: ${outputPath}`);
-        
-        // Для больших файлов лучше писать потоком
-        const writeStream = require('fs').createWriteStream(outputPath, { encoding: 'utf8' });
-        
-        // Начало массива
-        writeStream.write('[\n');
-        
-        // Пишем каждую строку
-        for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            const jsonRow = JSON.stringify(row);
-            writeStream.write(jsonRow);
-            
-            if (i < rows.length - 1) {
-                writeStream.write(',\n');
-            } else {
-                writeStream.write('\n');
-            }
-            
-            // Логирование прогресса
-            if (i > 0 && i % 10000 === 0) {
-                console.log(`Записано ${i} объектов JSON из ${rows.length}...`);
-            }
-        }
-        
-        // Конец массива
-        writeStream.write(']');
-        
-        // Закрываем поток
-        await new Promise((resolve, reject) => {
-            writeStream.end();
-            writeStream.on('finish', resolve);
-            writeStream.on('error', reject);
-        });
-        
-        console.log(`JSON файл сохранен: ${outputPath}`);
-        
-    } catch (error) {
-        console.error('Ошибка при сохранении JSON:', error.message);
-        throw error;
-    }
-}
-
-// Потоковая обработка для ОЧЕНЬ больших файлов
-async function processJsonFileStreaming(filePath, batchSize = 1000) {
-    return new Promise((resolve, reject) => {
-        const rows = [];
-        let buffer = '';
-        let inArray = false;
-        let objectDepth = 0;
-        let segmentCount = 0;
-        
-        const readStream = require('fs').createReadStream(filePath, { encoding: 'utf8', highWaterMark: 64 * 1024 }); // 64KB chunks
-        
-        readStream.on('data', (chunk) => {
-            buffer += chunk;
-            
-            // Обрабатываем объекты из буфера
-            let startPos = 0;
-            
-            if (!inArray) {
-                // Ищем начало массива semanticSegments
-                const arrayStart = buffer.indexOf('"semanticSegments":[');
-                if (arrayStart !== -1) {
-                    startPos = arrayStart + 20; // после "["
-                    inArray = true;
-                    buffer = buffer.slice(startPos);
-                }
-                return;
-            }
-            
-            // Парсим объекты из массива
-            while (buffer.length > 0) {
-                // Ищем начало объекта
-                if (objectDepth === 0) {
-                    const objStart = buffer.indexOf('{');
-                    if (objStart === -1) {
-                        buffer = '';
-                        break;
-                    }
-                    buffer = buffer.slice(objStart);
-                }
-                
-                // Парсим объект
-                let i = 0;
-                let inString = false;
-                let escapeNext = false;
-                
-                for (; i < buffer.length; i++) {
-                    const char = buffer[i];
-                    
-                    if (escapeNext) {
-                        escapeNext = false;
-                        continue;
-                    }
-                    
-                    if (char === '\\') {
-                        escapeNext = true;
-                        continue;
-                    }
-                    
-                    if (char === '"') {
-                        inString = !inString;
-                        continue;
-                    }
-                    
-                    if (!inString) {
-                        if (char === '{') {
-                            objectDepth++;
-                        } else if (char === '}') {
-                            objectDepth--;
-                            if (objectDepth === 0) {
-                                // Найден полный объект
-                                const jsonStr = buffer.slice(0, i + 1);
-                                try {
-                                    const segment = JSON.parse(jsonStr);
-                                    processSegment(segment);
-                                    segmentCount++;
-                                    
-                                    if (segmentCount % batchSize === 0) {
-                                        console.log(`Обработано ${segmentCount} сегментов...`);
-                                    }
-                                } catch (e) {
-                                    // Игнорируем ошибки парсинга
-                                }
-                                
-                                buffer = buffer.slice(i + 1);
-                                break;
-                            }
-                        }
-                    }
-                }
-                
-                if (i === buffer.length) {
-                    // Не нашли полный объект
-                    break;
-                }
-            }
-        });
-        
-        readStream.on('end', () => {
-            console.log(`Потоковая обработка завершена. Сегментов: ${segmentCount}, записей: ${rows.length}`);
-            resolve(rows);
-        });
-        
-        readStream.on('error', reject);
-        
-        function processSegment(segment) {
-            // Та же логика обработки, что и раньше
-            if (segment.activity) {
-                const activity = segment.activity;
-                
-                if (activity.start?.latLng) {
-                    const { latitude, longitude } = parseLatLng(activity.start.latLng);
-                    rows.push({
-                        startTime: segment.startTime || '',
-                        endTime: segment.endTime || '',
-                        probability: activity.topCandidate?.probability || 0.0,
-                        latitude,
-                        longitude,
-                        source: 'activity.start'
-                    });
-                }
-                
-                if (activity.end?.latLng) {
-                    const { latitude, longitude } = parseLatLng(activity.end.latLng);
-                    rows.push({
-                        startTime: segment.startTime || '',
-                        endTime: segment.endTime || '',
-                        probability: activity.topCandidate?.probability || 0.0,
-                        latitude,
-                        longitude,
-                        source: 'activity.end'
-                    });
-                }
-            }
-            else if (segment.visit) {
-                const visit = segment.visit;
-                
-                if (visit.topCandidate?.placeLocation?.latLng) {
-                    const { latitude, longitude } = parseLatLng(visit.topCandidate.placeLocation.latLng);
-                    rows.push({
-                        startTime: segment.startTime || '',
-                        endTime: segment.endTime || '',
-                        probability: visit.probability || 0.0,
-                        latitude,
-                        longitude,
-                        source: 'visit.placeLocation'
-                    });
-                }
-            }
-            else if (segment.timelinePath) {
-                for (const pointData of segment.timelinePath) {
-                    if (pointData.point && pointData.time) {
-                        const { latitude, longitude } = parseLatLng(pointData.point);
-                        rows.push({
-                            startTime: pointData.time,
-                            endTime: pointData.time,
-                            probability: '',
-                            latitude,
-                            longitude,
-                            source: 'timelinePath'
-                        });
-                    }
-                }
-            }
-        }
-    });
-}
-
-// Вывод статистики
-function printStatistics(rows) {
-    console.log('\n=== СТАТИСТИКА ===');
-    console.log(`Всего записей: ${rows.length}`);
+// Генерация статистики
+function generateStatistics(rows) {
+    const stats = [];
     
-    if (rows.length === 0) return;
+    // Основная статистика
+    stats.push({ "Параметр": "Всего записей", "Значение": rows.length });
     
-    // Подсчет по источникам
-    const sourceStats = {};
+    // Статистика по источникам
+    const sourceCounts = {};
     rows.forEach(row => {
-        sourceStats[row.source] = (sourceStats[row.source] || 0) + 1;
+        sourceCounts[row.source] = (sourceCounts[row.source] || 0) + 1;
     });
     
-    console.log('\nРаспределение по источникам:');
-    for (const [source, count] of Object.entries(sourceStats)) {
+    stats.push({ "Параметр": "--- По источникам ---", "Значение": "" });
+    Object.entries(sourceCounts).forEach(([source, count]) => {
         const percentage = ((count / rows.length) * 100).toFixed(1);
-        console.log(`  ${source}: ${count} (${percentage}%)`);
-    }
-    
-    // Проверка координат
-    const invalidCoords = rows.filter(row => !row.latitude || !row.longitude);
-    if (invalidCoords.length > 0) {
-        console.log(`\n⚠️  Записей с некорректными координатами: ${invalidCoords.length}`);
-    }
-    
-    // Примеры данных
-    console.log('\nПримеры записей (первые 3):');
-    rows.slice(0, 3).forEach((row, i) => {
-        console.log(`  ${i + 1}. ${row.startTime} | ${row.latitude}, ${row.longitude} | ${row.source}`);
+        stats.push({ 
+            "Параметр": source, 
+            "Значение": `${count} (${percentage}%)` 
+        });
     });
+    
+    // Статистика по координатам
+    const validCoords = rows.filter(row => row.latitude && row.longitude).length;
+    stats.push({ "Параметр": "--- Координаты ---", "Значение": "" });
+    stats.push({ "Параметр": "С валидными координатами", "Значение": validCoords });
+    stats.push({ "Параметр": "Без координат", "Значение": rows.length - validCoords });
+    
+    // Временной диапазон
+    if (rows.length > 0) {
+        const times = rows.map(row => new Date(row.startTime)).filter(d => !isNaN(d));
+        if (times.length > 0) {
+            const minTime = new Date(Math.min(...times)).toLocaleString();
+            const maxTime = new Date(Math.max(...times)).toLocaleString();
+            stats.push({ "Параметр": "--- Время ---", "Значение": "" });
+            stats.push({ "Параметр": "Начало", "Значение": minTime });
+            stats.push({ "Параметр": "Конец", "Значение": maxTime });
+        }
+    }
+    
+    // Дата генерации
+    stats.push({ "Параметр": "--- Инфо ---", "Значение": "" });
+    stats.push({ "Параметр": "Сгенерировано", "Значение": new Date().toLocaleString() });
+    
+    return stats;
 }
 
-// Основная асинхронная функция
-async function mainAsync(useStreaming = false) {
+// Сохранение в несколько форматов
+async function saveToMultipleFormats(rows, baseName) {
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const results = {};
+    
+    // Excel
+    const excelFile = `${baseName}_${timestamp}.xlsx`;
+    const excelInfo = await saveToExcel(rows, excelFile, {
+        title: 'Хронология событий',
+        sheetName: 'Данные',
+        includeStats: true
+    });
+    results.excel = excelInfo;
+    
+    // CSV (для совместимости)
+    const csvFile = `${baseName}_${timestamp}.csv`;
+    const csvContent = [
+        'startTime,endTime,probability,latitude,longitude,source',
+        ...rows.map(row => `"${row.startTime}","${row.endTime}",${row.probability || ''},"${row.latitude}","${row.longitude}","${row.source}"`)
+    ].join('\n');
+    await fs.writeFile(csvFile, csvContent, 'utf8');
+    results.csv = csvFile;
+    
+    // JSON (для проверки)
+    const jsonFile = `${baseName}_${timestamp}.json`;
+    await fs.writeFile(jsonFile, JSON.stringify(rows, null, 2), 'utf8');
+    results.json = jsonFile;
+    
+    return results;
+}
+
+// Основная функция
+async function main() {
     try {
-        const inputFile = 'Хронология.json';
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const inputFile = process.argv[2] || 'Хронология.json';
+        const outputBase = process.argv[3] || 'хронология';
         
-        console.log(`Начало обработки в ${new Date().toLocaleTimeString()}`);
+        console.log(`=== Обработка файла: ${inputFile} ===\n`);
         
-        let resultRows;
-        
-        // Выбор метода обработки
-        if (useStreaming) {
-            console.log('Используется потоковая обработка...');
-            resultRows = await processJsonFileStreaming(inputFile);
-        } else {
-            console.log('Используется стандартная обработка...');
-            resultRows = await processJsonFileAsync(inputFile);
+        // Проверяем существование файла
+        try {
+            await fs.access(inputFile);
+        } catch {
+            console.error(`❌ Файл "${inputFile}" не найден!`);
+            console.log('Использование: node script.js [входной.json] [префикс_выходного]');
+            process.exit(1);
         }
         
-        if (resultRows.length === 0) {
-            console.log('Нет данных для обработки.');
+        // Обрабатываем файл
+        const rows = await processJsonFileAsync(inputFile);
+        
+        if (rows.length === 0) {
+            console.log('⚠️  Нет данных для обработки.');
             return;
         }
         
-        // Выводим статистику
-        printStatistics(resultRows);
+        console.log(`\n✅ Обработано ${rows.length} записей\n`);
         
-        // Сохраняем результаты
-        const csvFile = `хронология_таблица_${timestamp}.csv`;
-        const jsonFile = `хронология_таблица_${timestamp}.json`;
+        // Сохраняем в несколько форматов
+        console.log('💾 Сохранение результатов...');
+        const savedFiles = await saveToMultipleFormats(rows, outputBase);
         
-        // Сохраняем параллельно для скорости
-        await Promise.all([
-            saveToCSVAsync(resultRows, csvFile),
-            saveToJSONAsync(resultRows, jsonFile)
-        ]);
+        console.log('\n✅ Результаты сохранены:');
+        console.log(`📊 Excel: ${savedFiles.excel.path} (${savedFiles.excel.rows} строк)`);
+        console.log(`📄 CSV:   ${savedFiles.csv}`);
+        console.log(`📁 JSON:  ${savedFiles.json}`);
         
-        console.log(`\nОбработка завершена в ${new Date().toLocaleTimeString()}`);
-        console.log(`Результаты сохранены в:\n  - ${csvFile}\n  - ${jsonFile}`);
+        // Выводим предпросмотр
+        console.log('\n👀 Предпросмотр первых 3 строк:');
+        console.table(rows.slice(0, 3));
         
     } catch (error) {
-        console.error('Ошибка в mainAsync:', error.message);
+        console.error('\n❌ Ошибка:', error.message);
         process.exit(1);
     }
-}
-
-// Обработка аргументов командной строки
-async function main() {
-    const args = process.argv.slice(2);
-    const useStreaming = args.includes('--stream') || args.includes('-s');
-    const inputFile = args.find(arg => !arg.startsWith('--') && !arg.startsWith('-')) || 'Хронология.json';
-    
-    // Проверяем существование файла
-    try {
-        await fs.access(inputFile);
-    } catch {
-        console.error(`Файл "${inputFile}" не найден!`);
-        console.log('Использование: node script.js [файл.json] [--stream]');
-        process.exit(1);
-    }
-    
-    console.log(`Обработка файла: ${inputFile}`);
-    console.log(`Режим: ${useStreaming ? 'потоковый' : 'стандартный'}`);
-    
-    await mainAsync(useStreaming);
 }
 
 // Экспорт функций
 module.exports = {
-    parseLatLng,
     processJsonFileAsync,
-    processJsonFileStreaming,
-    saveToCSVAsync,
-    saveToJSONAsync,
-    printStatistics
+    saveToExcel,
+    parseLatLng,
+    generateStatistics
 };
 
 // Запуск
 if (require.main === module) {
-    main().catch(error => {
-        console.error('Необработанная ошибка:', error);
-        process.exit(1);
-    });
+    main();
 }
