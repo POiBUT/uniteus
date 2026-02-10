@@ -39,7 +39,7 @@ async function processJsonFileAsync(filePath) {
             probability: activity.topCandidate?.probability || 0.0,
             latitude,
             longitude,
-            source: "activity.start",
+            source: `activity.start.${activity.topCandidate?.type}`,
           });
         }
 
@@ -51,7 +51,7 @@ async function processJsonFileAsync(filePath) {
             probability: activity.topCandidate?.probability || 0.0,
             latitude,
             longitude,
-            source: "activity.end",
+            source: `activity.end.${activity.topCandidate?.type}`,
           });
         }
       }
@@ -70,7 +70,7 @@ async function processJsonFileAsync(filePath) {
             probability: visit.probability || 0.0,
             latitude,
             longitude,
-            source: "visit.placeLocation",
+            source: `visit.${visit.topCandidate.semanticType}`,
           });
         }
       }
