@@ -279,84 +279,6 @@ function generateStatisticsSimple(rows) {
   return stats;
 }
 
-// Сохранение в Excel (XLSX)
-async function saveToExcel(rows, outputPath, options = {}) {
-  try {
-    console.log(`Создание Excel файла: ${outputPath}`);
-
-    // Создаем новую рабочую книгу
-    const wb = XLSX.utils.book_new();
-
-    // Ограничиваем количество строк для Excel (ограничение Excel: 1,048,576 строк)
-    const excelRows = rows.slice(0, 1000000); // Безопасное ограничение
-
-    // Преобразуем данные в рабочий лист
-    const ws = XLSX.utils.json_to_sheet(excelRows, {
-      header: [
-        "startTime",
-        "endTime",
-        "probability",
-        "latitude",
-        "longitude",
-        "source",
-      ],
-      skipHeader: false,
-    });
-
-    // Настраиваем ширину колонок
-    const colWidths = [
-      { wch: 30 }, // startTime
-      { wch: 30 }, // endTime
-      { wch: 15 }, // probability
-      { wch: 15 }, // latitude
-      { wch: 15 }, // longitude
-      { wch: 20 }, // source
-    ];
-    ws["!cols"] = colWidths;
-
-    // Добавляем заголовок
-    if (options.title) {
-      XLSX.utils.sheet_add_aoa(ws, [[options.title]], { origin: "A1" });
-      XLSX.utils.sheet_add_aoa(ws, [[""]], { origin: "A2" }); // Пустая строка
-      // Сдвигаем данные на 2 строки вниз
-      const range = XLSX.utils.decode_range(ws["!ref"]);
-      range.s.r = 2;
-      ws["!ref"] = XLSX.utils.encode_range(range);
-    }
-
-    // Добавляем лист в книгу
-    const sheetName = options.sheetName || "Хронология";
-    XLSX.utils.book_append_sheet(wb, ws, sheetName);
-
-    // Добавляем второй лист со статистикой (используем упрощенную версию)
-    if (options.includeStats) {
-      console.log("Генерация статистики...");
-      const stats = generateStatisticsSimple(rows); // Используем упрощенную версию
-      console.log("Статистика сгенерирована");
-      const statsWs = XLSX.utils.json_to_sheet(stats);
-      XLSX.utils.book_append_sheet(wb, statsWs, "Статистика");
-    }
-
-    // Сохраняем файл
-    XLSX.writeFile(wb, outputPath);
-
-    console.log(`Excel файл сохранен: ${outputPath}`);
-
-    // Возвращаем информацию о файле
-    const fileStats = await fs.stat(outputPath);
-    return {
-      path: outputPath,
-      size: fileStats.size,
-      rows: excelRows.length,
-      totalRows: rows.length,
-      sheets: wb.SheetNames.length,
-    };
-  } catch (error) {
-    console.error("Ошибка при сохранении Excel:", error.message);
-    throw error;
-  }
-}
-
 // Сохранение в несколько форматов с оптимизацией для больших файлов
 async function saveToMultipleFormats(rows, baseName) {
   const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, "-");
@@ -364,18 +286,8 @@ async function saveToMultipleFormats(rows, baseName) {
 
   console.log("Начинаю сохранение результатов...");
 
-  // Excel (основной файл)
-  const excelFile = `${baseName}_${timestamp}.xlsx`;
-  console.log("Создание Excel файла...");
-  const excelInfo = await saveToExcel(rows, excelFile, {
-    title: "Хронология событий",
-    sheetName: "Данные",
-    includeStats: true,
-  });
-  results.excel = excelInfo;
-
-  // CSV (частично, если данных много)
-  const maxCsvRowNumber = 500000;
+  // CSV (если данных много)
+  const maxCsvRowNumber = 50000000;
   if (rows.length <= maxCsvRowNumber) {
     console.log("Создание CSV файла...");
     const csvFile = `${baseName}_${timestamp}.csv`;
@@ -400,7 +312,7 @@ async function saveToMultipleFormats(rows, baseName) {
 
       writeStream.write(csvBatch);
 
-      if (i % 100000 === 0) {
+      if ((i >= batchSize && i % (100000 - batchSize) === 0) || i + batchSize >= rows.length) {
         console.log(
           `  CSV: записано ${Math.min(i + batchSize, rows.length)} из ${rows.length} строк`,
         );
@@ -416,44 +328,14 @@ async function saveToMultipleFormats(rows, baseName) {
     console.log(`Пропускаю создание CSV (слишком много данных: ${rows.length} строк, максимум: ${maxCsvRowNumber} строк)`);
   }
 
-  // JSON (только если данных немного)
-  const maxJsonRowNumber = 100000;
-  if (rows.length <= maxJsonRowNumber) {
-    console.log("Создание JSON файла...");
-    const jsonFile = `${baseName}_${timestamp}.json`;
-    // Записываем постепенно
-    const writeStream = require("fs").createWriteStream(jsonFile, {
-      encoding: "utf8",
-    });
-    writeStream.write("[\n");
-
-    for (let i = 0; i < rows.length; i++) {
-      const isLast = i === rows.length - 1;
-      writeStream.write(JSON.stringify(rows[i]) + (isLast ? "\n" : ",\n"));
-
-      if (i % 10000 === 0) {
-        console.log(`  JSON: записано ${i} из ${rows.length} строк`);
-      }
-    }
-
-    writeStream.write("]");
-    await new Promise((resolve) => {
-      writeStream.end(resolve);
-    });
-    results.json = jsonFile;
-    console.log(`JSON файл сохранен: ${jsonFile}`);
-  } else {
-    console.log(`Пропускаю создание JSON (слишком много данных: ${rows.length} строк, максимум: ${maxJsonRowNumber} строк)`);
-  }
-
   return results;
 }
 
 // Основная функция с обработкой ошибок памяти
 async function main() {
   try {
-    const inputFile = process.argv[2] || "Хронология.json";
-    const outputBase = process.argv[3] || "хронология";
+    const inputFile = process.argv[2] || "хронология1.json";
+    const outputBase = process.argv[3] || "хронология1";
 
     console.log(`=== Обработка файла: ${inputFile} ===\n`);
 
@@ -491,11 +373,7 @@ async function main() {
     const savedFiles = await saveToMultipleFormats(rows, outputBase);
 
     console.log("\n✅ Результаты сохранены:");
-    console.log(
-      `📊 Excel: ${savedFiles.excel.path} (${savedFiles.excel.rows} строк из ${savedFiles.excel.totalRows})`,
-    );
     if (savedFiles.csv) console.log(`📄 CSV:   ${savedFiles.csv}`);
-    if (savedFiles.json) console.log(`📁 JSON:  ${savedFiles.json}`);
 
     // Выводим предпросмотр
     if (rows.length <= 10) {
@@ -520,7 +398,6 @@ async function main() {
 // Экспорт функций
 module.exports = {
   processJsonFileAsync,
-  saveToExcel,
   parseLatLng,
   generateStatisticsSimple,
   getMinMaxDatesSafe,
