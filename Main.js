@@ -334,8 +334,8 @@ async function saveToMultipleFormats(rows, baseName) {
 // Основная функция с обработкой ошибок памяти
 async function main() {
   try {
-    const inputFile = process.argv[2] || "хронология1.json";
-    const outputBase = process.argv[3] || "хронология1";
+    const inputFile = process.argv[2] || "хронология2.json";
+    const outputBase = process.argv[3] || "хронология2";
 
     console.log(`=== Обработка файла: ${inputFile} ===\n`);
 
@@ -383,6 +383,9 @@ async function main() {
       console.log("\n👀 Предпросмотр первых 3 строк:");
       console.table(rows.slice(0, 3));
     }
+
+    // generateStatisticsSimple(rows);
+    // generateStatistics(rows);
   } catch (error) {
     console.error("\n❌ Ошибка:", error.message);
     if (error.message.includes("stack") || error.message.includes("memory")) {
