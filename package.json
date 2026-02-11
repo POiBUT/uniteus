@@ -1,10 +1,7 @@
 {
-  "dependencies": {
-    "xlsx": "^0.18.5"
-  },
   "scripts": {
-    "start": "node app.js", // npm run start
-    "compare": "node compare.js", // npm run compare
+    "start": "node app.js",
+    "compare": "node compare.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   }
 }

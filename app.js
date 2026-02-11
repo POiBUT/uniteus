@@ -1,5 +1,4 @@
 const fs = require("fs").promises;
-const XLSX = require("xlsx");
 const path = require("path");
 
 // Функция для парсинга координат

@@ -83,7 +83,7 @@ async function findMatchingRecords() {
         console.log(`Загружено записей: хронология1.csv - ${records1.length}, хронология2.csv - ${records2.length}`);
         
         const matches = [];
-        const usedIndices = new Set();
+        const processedIndices = new Set();
         
         // Предварительно вычисляем округленные координаты для records2
         const records2Lat = new Array(records2.length);
@@ -103,8 +103,8 @@ async function findMatchingRecords() {
             const lon1 = roundCoordinate(record1.longitude);
             
             for (let j = 0; j < records2.length; j++) {
-                // Пропускаем уже использованные записи
-                if (usedIndices.has(j)) continue;
+                // Пропускаем уже обработанные записи
+                if (processedIndices.has(j)) continue;
                 
                 const record2 = records2[j];
                 
@@ -126,8 +126,8 @@ async function findMatchingRecords() {
                             timeDifferenceMinutes: timeDiff
                         });
                         
-                        usedIndices.add(j);
-                        break;
+                        processedIndices.add(j);
+                        break; // Прерываем внутренний цикл после нахождения совпадения
                     }
                 }
             }
@@ -151,7 +151,6 @@ async function findMatchingRecordsOptimized() {
         console.log(`Загружено записей: хронология1.csv - ${records1.length}, хронология2.csv - ${records2.length}`);
         
         const matches = [];
-        const usedIndices = new Set();
         
         // Создаем Map для быстрого поиска по координатам
         const coordMap = new Map();
@@ -188,10 +187,6 @@ async function findMatchingRecordsOptimized() {
                 
                 for (let j = 0; j < matches2.length; j++) {
                     const match2 = matches2[j];
-                    
-                    // Пропускаем уже использованные записи
-                    //if (usedIndices.has(match2.index)) continue;
-                    
                     const record2 = match2.record;
                     
                     if (isTimeMatch(record1.startTime, record2.startTime)) {
@@ -207,8 +202,11 @@ async function findMatchingRecordsOptimized() {
                             timeDifferenceMinutes: timeDiff
                         });
                         
-                        usedIndices.add(match2.index);
-                        break;
+                        // Удаляем использованную запись, чтобы не было повторений
+                        coordMap.get(key).splice(j, 1);
+                        j--;
+                        
+                        break; // Прерываем после нахождения совпадения
                     }
                 }
             }
