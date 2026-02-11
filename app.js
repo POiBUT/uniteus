@@ -332,10 +332,15 @@ async function saveToMultipleFormats(rows, baseName) {
 }
 
 // Основная функция с обработкой ошибок памяти
-async function main() {
+// Перегрузки:
+// 1) argv[2] - файл JSON 
+// node app.js хронология1.json - спарсить файл хронологии JSON в таблицу CSV
+// 2) argv[2] и argv[3] - файлы CSV - сравнение хронологий
+// node app.js хронология1_2026-02-10T20-31-35.csv хронология2_2026-02-10T20-39-24.csv
+async function app() {
   try {
-    const inputFile = process.argv[2] || "хронология2.json";
-    const outputBase = process.argv[3] || "хронология2";
+    const inputFile = process.argv[2] || "хронология1.json";
+    const outputBase = path.basename(inputFile, path.extname(inputFile));
 
     console.log(`=== Обработка файла: ${inputFile} ===\n`);
 
@@ -345,7 +350,8 @@ async function main() {
     } catch {
       console.error(`❌ Файл "${inputFile}" не найден!`);
       console.log(
-        "Использование: node script.js [входной.json] [префикс_выходного]",
+        "Использование извлечения: node app.js [входной.json]",
+        "Использование сравнения: node app.js [входной1.csv] [входной2.csv]",
       );
       process.exit(1);
     }
@@ -413,5 +419,5 @@ if (require.main === module) {
     console.log("Используется увеличенный лимит памяти");
   }
 
-  main();
+  app();
 }
